@@ -260,7 +260,7 @@ describe('draft-provider model discovery', () => {
       .rejects.toMatchObject({ code: 'DISCOVERY_FAILED' })
   })
 
-  it.each(['anthropic-messages', 'azure-openai-responses', 'openai-codex-responses', 'google-generative-ai'])(
+  it.each(['azure-openai-responses', 'openai-codex-responses', 'google-generative-ai'])(
     'says it cannot interrogate %s rather than guessing a shape',
     async (api) => {
       // Azure authenticates with an `api-key` header and an `api-version`
@@ -330,6 +330,48 @@ describe('draft-provider model discovery', () => {
 
     await expect(ctx.llm.discoverModels('llm-pi-ai', { provider: 'openai' }))
       .rejects.toMatchObject({ code: 'NO_DISCOVERY' })
+  })
+})
+
+describe('anthropic-protocol model discovery', () => {
+  it('reads Anthropic’s /v1/models with x-api-key auth and the version header', async () => {
+    const server = await listingServer({
+      body: JSON.stringify({
+        data: [
+          { id: 'k3', display_name: 'Kimi K3', context_length: 1_048_576 },
+          { id: 'k3-256k' },
+        ],
+        has_more: false,
+      }),
+    })
+    const ctx = await harness()
+
+    const models = await ctx.llm.discoverModels('llm-pi-ai', {
+      baseURL: `${server.url}/coding`,
+      api: 'anthropic-messages',
+      apiKey: 'sk-kimi-probe',
+    })
+
+    expect(models).toEqual([
+      { id: 'k3', name: 'Kimi K3', contextWindow: 1_048_576 },
+      { id: 'k3-256k' },
+    ])
+    // Anthropic bases carry no /v1 — the SDK appends /v1/messages itself — so
+    // the listing path brings the version segment along.
+    expect(server.paths).toEqual(['/coding/v1/models'])
+    expect(server.headers[0]?.['x-api-key']).toBe('sk-kimi-probe')
+    expect(server.headers[0]?.['anthropic-version']).toBe('2023-06-01')
+    expect(server.headers[0]?.authorization).toBeUndefined()
+  })
+
+  it('sends the version header even when the draft names no key', async () => {
+    const server = await listingServer({ body: JSON.stringify({ data: [{ id: 'm' }] }) })
+    const ctx = await harness()
+
+    await ctx.llm.discoverModels('llm-pi-ai', { baseURL: server.url, api: 'anthropic-messages' })
+
+    expect(server.headers[0]?.['x-api-key']).toBeUndefined()
+    expect(server.headers[0]?.['anthropic-version']).toBe('2023-06-01')
   })
 })
 

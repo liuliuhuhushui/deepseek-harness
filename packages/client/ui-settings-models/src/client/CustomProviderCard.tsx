@@ -29,6 +29,7 @@ import { EditorFooter } from './EditorFooter.tsx'
 import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import type { ModelDraft } from './ModelListEditor.tsx'
+import type { ForkTemplate } from './catalogTemplates.ts'
 import { deriveKeyRef, messageOf } from './store.ts'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
@@ -64,6 +65,14 @@ export interface CustomProviderCardProps {
   t: (key: keyof typeof en) => string
   /** Disable writes (read-only settings provider). */
   readOnly: boolean
+  /**
+   * Fork prefill: the card opens as a second account of an existing route,
+   * every field holding what the source route serves. The route id stays
+   * editable — it is still the value being chosen here.
+   */
+  template?: ForkTemplate
+  /** Header copy override (the fork names its source route); defaults to the custom-provider title. */
+  title?: string
   /** Close the card; `changed` reports whether a provider was created. */
   onClose: (changed: boolean) => void
 }
@@ -74,16 +83,17 @@ export interface CustomProviderCardProps {
  * @returns the creation card.
  */
 export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
-  const { taken, protocols, api, t } = props
+  const { taken, protocols, api, t, template } = props
   // Captured at mount, like the editor's: the write must be judged against the
   // section this card was drafted over, not whatever it grew into meanwhile.
   const [openedAt] = useState(() => props.revision)
-  const [route, setRoute] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [baseURL, setBaseURL] = useState('')
-  const [protocol, setProtocol] = useState(protocols[0] ?? '')
+  // A fork prefills from its template; a blank declare starts empty, as before.
+  const [route, setRoute] = useState(() => template?.route ?? '')
+  const [displayName, setDisplayName] = useState(() => template?.displayName ?? '')
+  const [baseURL, setBaseURL] = useState(() => template?.baseURL ?? '')
+  const [protocol, setProtocol] = useState(() => template?.protocol ?? protocols[0] ?? '')
   const [keyDraft, setKeyDraft] = useState('')
-  const [models, setModels] = useState<readonly ModelDraft[]>([])
+  const [models, setModels] = useState<readonly ModelDraft[]>(() => template?.models ?? [])
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /**
@@ -190,7 +200,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
   return (
     <div className={styles['editor']}>
       <div className={styles['editorHeader']}>
-        <span className={styles['editorTitle']}>{t('customTitle')}</span>
+        <span className={styles['editorTitle']}>{props.title ?? t('customTitle')}</span>
       </div>
       <div className={styles['field']}>
         <span className={styles['fieldLabel']}>{t('customRoute')}</span>

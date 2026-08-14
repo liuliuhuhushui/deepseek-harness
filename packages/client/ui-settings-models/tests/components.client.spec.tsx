@@ -901,7 +901,8 @@ describe('ModelsSection', () => {
     const { mutate, set } = await mountSection()
     fireEvent.click(screen.getByText(en.add))
     const pick = await screen.findByLabelText<HTMLSelectElement>(en.provider)
-    expect([...pick.options].map(option => option.value)).toEqual(['anthropic', 'broken', 'plain'])
+    // A configured pi-ai route stays listed: picking it forks a second account.
+    expect([...pick.options].map(option => option.value)).toEqual(['openai', 'anthropic', 'broken', 'plain'])
     expect(pick.value).toBe('anthropic')
     // A dormant profile has no endpoint anywhere: the pi-ai placeholder
     // falls back to the provider-default wording.

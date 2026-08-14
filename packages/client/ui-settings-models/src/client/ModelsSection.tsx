@@ -18,6 +18,7 @@ import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-web-react'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
+import { ForkProviderCard } from './ForkProviderCard.tsx'
 import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
 import type { ModelsSettingsState, ModelsSettingsStore, ProviderRow } from './store.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
@@ -263,9 +264,19 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
   // step: whether the user already has a provider to talk to.
   const anyUsable = state.rows.some(providerUsable)
   const configured = state.rows.filter(row => row.configured)
-  const addable = state.rows.filter(row => !row.configured && row.entry.settingsNs !== '')
+  // A configured, live pi-ai route stays addable: picking it forks a second
+  // account onto a fresh route id rather than rewriting the first account's
+  // profile. A route the adapter does not serve stays out, exactly as before.
+  const addable = state.rows.filter(row =>
+    row.entry.settingsNs !== ''
+    && (!row.configured || (row.entry.settingsNs === 'llm-pi-ai' && row.entry.active)))
   const addTarget = adding ? editing : undefined
   const addNamespace = addTarget === undefined ? undefined : state.namespaces.get(addTarget.settingsNs)
+  // The selected addable row, when it is one already serving: its card is the
+  // fork prefilled from it, not the editor that would overwrite its profile.
+  const forkRow = addTarget === undefined
+    ? undefined
+    : addable.find(row => row.configured && row.entry.provider === addTarget.provider)
   // Hand-declared routes live in the pi-ai namespace, which is also the only
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
@@ -413,18 +424,35 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                   ))}
                 </select>
               </div>
-              <ProviderEditor
-                key={addTarget.provider}
-                provider={addTarget.provider}
-                displayName={addTarget.displayName}
-                hideTitle
-                namespace={addNamespace}
-                settingsPath={addTarget.settingsPath}
-                api={api}
-                t={t}
-                readOnly={!state.writable}
-                onClose={(changed) => { closeEditor(changed, addTarget) }}
-              />
+              {forkRow !== undefined
+                ? (
+                  <ForkProviderCard
+                    key={forkRow.entry.provider}
+                    row={forkRow}
+                    namespace={addNamespace}
+                    taken={state.rows.map(row => row.entry.provider)}
+                    protocols={protocols}
+                    revision={state.namespaces.get('llm-pi-ai')?.revision ?? 0}
+                    api={api}
+                    t={t}
+                    readOnly={!state.writable}
+                    onClose={(changed) => { closeEditor(changed, addTarget) }}
+                  />
+                )
+                : (
+                  <ProviderEditor
+                    key={addTarget.provider}
+                    provider={addTarget.provider}
+                    displayName={addTarget.displayName}
+                    hideTitle
+                    namespace={addNamespace}
+                    settingsPath={addTarget.settingsPath}
+                    api={api}
+                    t={t}
+                    readOnly={!state.writable}
+                    onClose={(changed) => { closeEditor(changed, addTarget) }}
+                  />
+                )}
             </div>
           )
           : declaring
@@ -456,7 +484,10 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                   className={styles['addButton']}
                   disabled={addable.length === 0 || !state.writable}
                   onClick={() => {
-                    const first = addable[0]
+                    // Prefer a dormant row as the opening pick, so the common
+                    // case still lands on the adopt flow; a configured row is
+                    // one deliberate select away and opens the fork instead.
+                    const first = addable.find(row => !row.configured) ?? addable[0]
                     /* v8 ignore next -- the button is disabled while nothing is addable */
                     if (first === undefined) return
                     setSavedTarget(undefined)

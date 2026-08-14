@@ -13,11 +13,13 @@
  * metadata the surface offers for adoption. `settings.yaml` remains the only
  * thing that decides what a route serves.
  *
- * Only OpenAI-compatible protocols are interrogated. Their listing is the one
- * shape a gateway, a self-hosted server, and the official endpoints all agree
- * on, which is the case this action exists for; every other protocol reports
- * that it cannot be interrogated so the surface falls back to hand-entry
- * rather than guessing a response shape.
+ * OpenAI-compatible protocols are interrogated with OpenAI's `GET /models`
+ * shape and bearer auth — the one listing a gateway, a self-hosted server,
+ * and the official OpenAI endpoints all agree on. `anthropic-messages` is
+ * interrogated with Anthropic's own `GET /v1/models` and `x-api-key` auth,
+ * which the official endpoint and Anthropic-compatible gateways alike answer.
+ * Every other protocol reports that it cannot be interrogated so the surface
+ * falls back to hand-entry rather than guessing a response shape.
  *
  * @module dsh-llm-pi-ai/discovery
  */
@@ -29,15 +31,17 @@ import { catalogModels } from './catalog.ts'
 
 /**
  * Protocols whose model listing this module can read: the two that speak
- * OpenAI's `GET /models` shape with bearer auth. Azure is absent despite its
- * OpenAI lineage — it authenticates with an `api-key` header and requires an
- * `api-version` query — and Codex authenticates through OAuth; guessing at
- * either would report an authentication failure as a provider with no models.
- * pi-ai's remaining protocols are absent for the same reason.
+ * OpenAI's `GET /models` shape with bearer auth, plus `anthropic-messages`
+ * with Anthropic's `GET /v1/models` and `x-api-key` auth. Azure is absent
+ * despite its OpenAI lineage — it authenticates with an `api-key` header and
+ * requires an `api-version` query — and Codex authenticates through OAuth;
+ * guessing at either would report an authentication failure as a provider
+ * with no models. pi-ai's remaining protocols are absent for the same reason.
  */
 const LISTABLE_PROTOCOLS: ReadonlySet<string> = new Set([
   'openai-completions',
   'openai-responses',
+  'anthropic-messages',
 ])
 
 /**
@@ -81,10 +85,16 @@ function label(...candidates: readonly unknown[]): string | undefined {
  * Join the endpoint base with the listing path. The base is treated as a
  * prefix rather than a URL to resolve against, so a deployment path such as
  * `https://gateway.example/openai/v1` keeps its segments instead of losing
- * them to `URL` resolution.
+ * them to `URL` resolution. OpenAI bases conventionally already end in `/v1`;
+ * Anthropic ones never do (their SDK appends `/v1/messages` itself), so the
+ * anthropic listing path carries the version segment explicitly.
+ * @param baseURL - the draft endpoint as the form shows it.
+ * @param api - the wire protocol the listing is read over.
+ * @returns the model-listing URL to GET.
  */
-function listingUrl(baseURL: string): string {
-  return `${baseURL.replace(/\/+$/, '')}/models`
+function listingUrl(baseURL: string, api: string): string {
+  const base = baseURL.replace(/\/+$/, '')
+  return api === 'anthropic-messages' ? `${base}/v1/models` : `${base}/models`
 }
 
 /**
@@ -229,7 +239,7 @@ export async function discoverModels(
       'DISCOVERY_UNSUPPORTED',
     )
   }
-  const url = listingUrl(request.baseURL)
+  const url = listingUrl(request.baseURL, api)
   // A key typed into the form wins: it is the one the user is testing, and it
   // may be the replacement for exactly the stored key that is failing. The
   // stored one is only asked for here, past the catalog short-circuit and the
@@ -245,7 +255,14 @@ export async function discoverModels(
       method: 'GET',
       headers: {
         accept: 'application/json',
-        ...apiKey === undefined ? {} : { authorization: `Bearer ${apiKey}` },
+        // Anthropic authenticates with `x-api-key` and wants the version header
+        // on every call; OpenAI-lineage endpoints take a bearer token.
+        ...api === 'anthropic-messages' ? { 'anthropic-version': '2023-06-01' } : {},
+        ...apiKey === undefined
+          ? {}
+          : api === 'anthropic-messages'
+            ? { 'x-api-key': apiKey }
+            : { authorization: `Bearer ${apiKey}` },
         ...attributionHeaders(),
       },
       ...request.signal === undefined ? {} : { signal: request.signal },

@@ -6,9 +6,10 @@
  * @module @deepseek-ai/dsh-web-app/startup
  */
 
-import { Command } from 'commander'
+import { Command, CommanderError } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
-import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
+import { internals as cmdlineInternals, parseCmdline } from '@deepseek-ai/dsh-cmdline'
+import { internals as desktopShortcut } from './desktop-shortcut.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'web-startup'
@@ -34,6 +35,7 @@ interface WebOptions {
   host?: string
   port?: string
   trustedHost?: string[]
+  installShortcut?: boolean
 }
 
 /**
@@ -48,10 +50,12 @@ function webCommand(): Command {
     .option('--host <host>', 'bind host')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
     .option('--trusted-host <authority...>', 'extra authority the /api browser-trust fence accepts (host or host:port; repeatable)')
+    .option('--install-shortcut', 'install the "dsh Web" desktop shortcut (Windows) and exit without serving')
     .addHelpText('after', `
 Examples:
   dsh --profile web                          serve on the composed host and port
   dsh --profile web --port 8080              serve on another port
+  dsh --profile web --install-shortcut       put a "dsh Web" launcher on the desktop
 `)
 }
 
@@ -66,6 +70,20 @@ export function apply(ctx: Context): void {
   const program = webCommand()
   program.action(() => {
     const options = program.opts<WebOptions>()
+    // One-shot maintenance flag: install and exit without providing the
+    // service, so the server never mounts.
+    if (options.installShortcut === true) {
+      const result = desktopShortcut.installDesktopShortcut()
+      if (!result.ok) {
+        program.error(`error: ${result.reason}`)
+      } else {
+        cmdlineInternals.stdout.write(`dsh web: desktop shortcut installed at ${result.shortcut}\n`)
+        // parseCmdline routes commander's control flow to ctx.appExit; it only
+        // recognizes codes with the `commander.` prefix, so reuse that contract
+        // to end the boot with success.
+        throw new CommanderError(0, 'commander.installShortcut', '')
+      }
+    }
     if (options.host === '0.0.0.0') {
       program.error('error: --host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
     }

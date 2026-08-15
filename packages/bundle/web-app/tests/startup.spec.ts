@@ -12,6 +12,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { afterEach, describe, expect, it } from 'vitest'
+import { internals as desktopShortcut } from '../src/desktop-shortcut.ts'
 import { apply, WEB_STARTUP_SERVICE, type WebStartupValues } from '../src/startup.ts'
 
 /** What one fixture boot observed. */
@@ -135,5 +136,36 @@ describe('web command-line provider', () => {
     expect(values).toBeUndefined()
     expect(observed.readerConfig).toBeUndefined()
     expect(observed.exits).toEqual([1])
+  })
+
+  it('installs the desktop shortcut and exits without providing the service', async () => {
+    const original = desktopShortcut.installDesktopShortcut
+    desktopShortcut.installDesktopShortcut = () => ({
+      ok: true,
+      shortcut: 'C:\\Users\\whale\\Desktop\\dsh Web.lnk',
+      dir: 'C:\\Users\\whale\\.dsh\\web-app',
+    })
+    try {
+      const { values, observed } = await bootProvider(['--install-shortcut'])
+      expect(observed.out).toContain('desktop shortcut installed at C:\\Users\\whale\\Desktop\\dsh Web.lnk')
+      expect(observed.exits).toEqual([0])
+      expect(values).toBeUndefined()
+      expect(observed.readerConfig).toBeUndefined()
+    } finally {
+      desktopShortcut.installDesktopShortcut = original
+    }
+  })
+
+  it('turns an installer refusal into a usage error', async () => {
+    const original = desktopShortcut.installDesktopShortcut
+    desktopShortcut.installDesktopShortcut = () => ({ ok: false, reason: '--install-shortcut is only supported on Windows (this is linux)' })
+    try {
+      const { values, observed } = await bootProvider(['--install-shortcut'])
+      expect(observed.out).toContain('--install-shortcut is only supported on Windows')
+      expect(observed.exits).toEqual([1])
+      expect(values).toBeUndefined()
+    } finally {
+      desktopShortcut.installDesktopShortcut = original
+    }
   })
 })
